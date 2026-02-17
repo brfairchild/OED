@@ -1,36 +1,58 @@
 const http = require('http');
 
-// mock server URL
-const url = 'http://localhost:8000';
+// Default values if no arguments are provided
 
-// TESTING 2 hour window
-const startTime = new Date('2025-01-01T08:00:00Z'); // found the easiest time to start on sample data
-const endTime = new Date(startTime.getTime() + 2 * 60 * 60 * 1000); // +2 hours
 
-http.get(url, (res) => {
-    let data = '';
+// HOW TO MAKE CALLS WITH EXAMPLES FROM MOCK:
 
-    res.on('data', chunk => {
-        data += chunk;
-    });
+// node ball.js [FQR] [AttributeID] [StartTime] [EndTime]
+// Default : ball.js
+// Different Meter and Attribute: node ball.js "NAE-01/Building-Power" 123
+// Completely Custom Time Window: node ball.js "Metasys15_NAE-47" 85 "2025-02-15T12:00:00Z" "2025-02-15T14:00:00Z"
 
-    res.on('end', () => {
-        try {
-            const jsonData = JSON.parse(data);
+const args = process.argv.slice(2);
+const CONFIG = {
+    host: 'localhost',
+    port: 8000,
+    fqr: args[0] || 'Metasys15_NAE-47_ModbusTCP',
+    attributeId: args[1] || 85,
+    startTime: args[2] || '2025-01-01T08:00:00Z',
+    endTime: args[3] || '2025-01-01T10:00:00Z'
+};
 
-            // Filter 2 hours worth of data
-            const filtered = jsonData.filter(item => {
-                const itemTime = new Date(item.timestamp);
-                return itemTime >= startTime && itemTime < endTime;
-            });
+function getObjectId(fqr, callback) {
+    const encodedFqr = encodeURIComponent(fqr);
+    const url = `http://${CONFIG.host}:${CONFIG.port}/api/v3/objectIdentifiers?fqr=${encodedFqr}`;
 
-            console.log('Filtered Data:', filtered);
+    http.get(url, (res) => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+            try {
+                const result = JSON.parse(data);
+                if (result.id) callback(null, result.id);
+                else callback(new Error("ID not found"));
+            } catch (e) { callback(e); }
+        });
+    }).on('error', (err) => callback(err));
+}
 
-        } catch (err) {
-            console.error('Error parsing data:', err);
-        }
-    });
+function generateFinalUri(objectId) {
+    const query = new URLSearchParams({
+        startTime: CONFIG.startTime,
+        endTime: CONFIG.endTime,
+        pageSize: 1000,
+        sort: 'timestamp'
+    }).toString();
 
-}).on('error', err => {
-    console.error('Error fetching mock data:', err);
+    return `http://${CONFIG.host}:${CONFIG.port}/api/v3/objects/${objectId}/attributes/${CONFIG.attributeId}/samples?${query}`;
+}
+
+// Execution 
+getObjectId(CONFIG.fqr, (err, id) => {
+    if (err) {
+        console.error('Error:', err.message);
+        return;
+    }
+    console.log(generateFinalUri(id));
 });
